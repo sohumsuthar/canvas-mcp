@@ -22,6 +22,7 @@ import {
   getCoursePages,
   getPageContent,
   getModuleItemContent,
+  readCourseFile,
 } from "./tools.js";
 
 // Validate env vars immediately on startup
@@ -164,6 +165,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "read_course_file",
+      description:
+        "Download and parse a Canvas file by file ID. PDFs are fully extracted into readable text. Use get_course_files to find file IDs. Use this to read lecture slides, syllabi, or any PDF posted to a course.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          course_id: { type: "number", description: "The Canvas course ID." },
+          file_id: { type: "number", description: "The Canvas file ID (from get_course_files)." },
+        },
+        required: ["course_id", "file_id"],
+      },
+    },
+    {
       name: "get_module_item_content",
       description:
         "Read the full content of all items inside a Canvas module by name — including the text of lecture pages and file info. Use this to get what was covered in a specific lecture or week. Example: module_name='Week 6' or module_name='L15'.",
@@ -273,6 +287,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (typeof pageUrl !== "string")
           throw new McpError(ErrorCode.InvalidParams, "page_url must be a string.");
         result = await getPageContent(courseId, pageUrl);
+        break;
+      }
+
+      case "read_course_file": {
+        const courseId = args?.course_id;
+        const fileId = args?.file_id;
+        if (typeof courseId !== "number")
+          throw new McpError(ErrorCode.InvalidParams, "course_id must be a number.");
+        if (typeof fileId !== "number")
+          throw new McpError(ErrorCode.InvalidParams, "file_id must be a number.");
+        result = await readCourseFile(courseId, fileId);
         break;
       }
 

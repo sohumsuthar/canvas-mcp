@@ -1,5 +1,9 @@
+import * as pdfParseModule from "pdf-parse";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const pdfParse: (buf: Buffer) => Promise<{ text: string }> = (pdfParseModule as any).default ?? pdfParseModule;
 import {
   BASE_URL,
+  AUTH_HEADERS,
   fetchAllPages,
   fetchOne,
   CanvasCourse,
@@ -14,6 +18,18 @@ import {
   CanvasFile,
   CanvasPage,
 } from "./canvas-client.js";
+
+// ── PDF helper ────────────────────────────────────────────────────────────────
+
+async function parsePdfFromUrl(url: string): Promise<string> {
+  const response = await fetch(url, { headers: AUTH_HEADERS });
+  if (!response.ok) {
+    throw new Error(`Failed to download file: ${response.status} ${response.statusText}`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const data = await pdfParse(buffer);
+  return data.text.replace(/\n{3,}/g, "\n\n").trim();
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -506,7 +522,16 @@ export async function getModuleItemContent(courseId: number, moduleName: string)
             `${BASE_URL}/courses/${courseId}/files/${item.content_id}`
           );
           results.push(`File: ${file.display_name} (${file.content_type}, ${(file.size / 1024).toFixed(1)} KB)`);
-          results.push(`Download: ${file.url}`);
+          if (file.content_type === "application/pdf") {
+            try {
+              const text = await parsePdfFromUrl(file.url);
+              results.push(`\n[PDF Content]\n${text}`);
+            } catch (e) {
+              results.push(`(PDF parsing failed: ${e instanceof Error ? e.message : String(e)})`);
+            }
+          } else {
+            results.push(`Download: ${file.url}`);
+          }
         } catch {
           results.push("(Could not load file info)");
         }
@@ -517,4 +542,30 @@ export async function getModuleItemContent(courseId: number, moduleName: string)
   }
 
   return results.join("\n");
+}
+
+export async function readCourseFile(courseId: number, fileId: number): Promise<string> {
+  const file = await fetchOne<CanvasFile>(
+    `${BASE_URL}/courses/${courseId}/files/${fileId}`
+  );
+
+  if (file.content_type === "application/pdf") {
+    const text = await parsePdfFromUrl(file.url);
+    return [
+      `File: ${file.display_name}`,
+      `Type: PDF  |  Size: ${(file.size / 1024).toFixed(1)} KB`,
+      `Updated: ${file.updated_at}`,
+      ``,
+      text,
+    ].join("\n");
+  }
+
+  // For non-PDF files just return metadata
+  return [
+    `File: ${file.display_name}`,
+    `Type: ${file.content_type}  |  Size: ${(file.size / 1024).toFixed(1)} KB`,
+    `Updated: ${file.updated_at}`,
+    `Download URL: ${file.url}`,
+    `(Only PDF files can be parsed into text. This file type cannot be read directly.)`,
+  ].join("\n");
 }
