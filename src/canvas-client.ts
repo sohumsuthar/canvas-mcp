@@ -178,6 +178,7 @@ export interface CanvasModuleItem {
   content_id?: number;
   url?: string;
   html_url?: string;
+  page_url?: string;
 }
 
 export interface CanvasDiscussionTopic {

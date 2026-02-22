@@ -21,6 +21,7 @@ import {
   getCourseFiles,
   getCoursePages,
   getPageContent,
+  getModuleItemContent,
 } from "./tools.js";
 
 // Validate env vars immediately on startup
@@ -162,6 +163,22 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["course_id", "page_url"],
       },
     },
+    {
+      name: "get_module_item_content",
+      description:
+        "Read the full content of all items inside a Canvas module by name — including the text of lecture pages and file info. Use this to get what was covered in a specific lecture or week. Example: module_name='Week 6' or module_name='L15'.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          course_id: { type: "number", description: "The Canvas course ID." },
+          module_name: {
+            type: "string",
+            description: "Partial module name to search for (e.g. 'Week 6', 'Lecture 3', 'L15').",
+          },
+        },
+        required: ["course_id", "module_name"],
+      },
+    },
   ],
 }));
 
@@ -256,6 +273,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (typeof pageUrl !== "string")
           throw new McpError(ErrorCode.InvalidParams, "page_url must be a string.");
         result = await getPageContent(courseId, pageUrl);
+        break;
+      }
+
+      case "get_module_item_content": {
+        const courseId = args?.course_id;
+        const moduleName = args?.module_name;
+        if (typeof courseId !== "number")
+          throw new McpError(ErrorCode.InvalidParams, "course_id must be a number.");
+        if (typeof moduleName !== "string")
+          throw new McpError(ErrorCode.InvalidParams, "module_name must be a string.");
+        result = await getModuleItemContent(courseId, moduleName);
         break;
       }
 

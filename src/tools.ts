@@ -453,3 +453,68 @@ export async function getPageContent(courseId: number, pageUrl: string): Promise
     body,
   ].join("\n");
 }
+
+export async function getModuleItemContent(courseId: number, moduleName: string): Promise<string> {
+  // Find module matching the name (case-insensitive substring match)
+  const modules = await fetchAllPages<CanvasModule>(
+    `${BASE_URL}/courses/${courseId}/modules?per_page=100`
+  );
+
+  const matches = modules.filter((m) =>
+    m.name.toLowerCase().includes(moduleName.toLowerCase())
+  );
+
+  if (matches.length === 0) {
+    const names = modules.map((m) => m.name).join(", ");
+    return `No module matching "${moduleName}" found in course ${courseId}.\n\nAvailable modules: ${names}`;
+  }
+
+  const results: string[] = [];
+
+  for (const mod of matches) {
+    const items = await fetchAllPages<CanvasModuleItem>(
+      `${BASE_URL}/courses/${courseId}/modules/${mod.id}/items?per_page=100`
+    );
+
+    results.push(`=== Module: ${mod.name} ===`);
+
+    for (const item of items) {
+      results.push(`\n--- ${item.title} [${item.type}] ---`);
+
+      if (item.type === "Page" && item.page_url) {
+        try {
+          const page = await fetchOne<CanvasPage>(
+            `${BASE_URL}/courses/${courseId}/pages/${item.page_url}`
+          );
+          const body = page.body
+            ? page.body
+                .replace(/<[^>]*>/g, "")
+                .replace(/&nbsp;/g, " ")
+                .replace(/&amp;/g, "&")
+                .replace(/&lt;/g, "<")
+                .replace(/&gt;/g, ">")
+                .replace(/\n{3,}/g, "\n\n")
+                .trim()
+            : "No content";
+          results.push(body);
+        } catch {
+          results.push("(Could not load page content)");
+        }
+      } else if (item.type === "File" && item.content_id) {
+        try {
+          const file = await fetchOne<CanvasFile>(
+            `${BASE_URL}/courses/${courseId}/files/${item.content_id}`
+          );
+          results.push(`File: ${file.display_name} (${file.content_type}, ${(file.size / 1024).toFixed(1)} KB)`);
+          results.push(`Download: ${file.url}`);
+        } catch {
+          results.push("(Could not load file info)");
+        }
+      } else if (item.html_url) {
+        results.push(`Link: ${item.html_url}`);
+      }
+    }
+  }
+
+  return results.join("\n");
+}
