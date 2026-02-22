@@ -180,7 +180,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "get_module_item_content",
       description:
-        "Read the full content of all items inside a Canvas module by name — including the text of lecture pages and file info. Use this to get what was covered in a specific lecture or week. Example: module_name='Week 6' or module_name='L15'.",
+        "Read the full text content of Canvas module items — lecture pages, lecture notes, and PDF files. USE THIS TOOL when asked about: what was in a lecture, what was covered this week, last lecture content, lecture notes, course readings. Do NOT use get_assignments for lecture content. Example: module_name='Week 6' reads all lectures in week 6. module_name='L17' reads a specific lecture.",
       inputSchema: {
         type: "object",
         properties: {
