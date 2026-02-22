@@ -18,23 +18,17 @@ import {
   getCourseModules,
   getAnnouncements,
   getTodoItems,
+  getCourseFiles,
+  getCoursePages,
+  getPageContent,
 } from "./tools.js";
 
 // Validate env vars immediately on startup
 validateEnv();
 
-// ── Server setup ─────────────────────────────────────────────────────────────
-
 const server = new Server(
-  {
-    name: "canvas-mcp",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
+  { name: "canvas-mcp", version: "1.1.0" },
+  { capabilities: { tools: {} } }
 );
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
@@ -45,23 +39,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: "get_courses",
       description:
         "Fetch all active enrolled Canvas courses including id, name, course_code, start_at, and end_at.",
-      inputSchema: {
-        type: "object",
-        properties: {},
-        required: [],
-      },
+      inputSchema: { type: "object", properties: {}, required: [] },
     },
     {
       name: "get_assignments",
       description:
-        "Fetch all assignments for a specific Canvas course by course_id. Returns name, due_at, points_possible, submission_types, and whether submissions exist.",
+        "Fetch all assignments for a specific Canvas course. Returns name, due_at, points_possible, submission_types, and the student's personal submission status (submitted/graded/unsubmitted).",
       inputSchema: {
         type: "object",
         properties: {
-          course_id: {
-            type: "number",
-            description: "The Canvas course ID (use get_courses to find IDs).",
-          },
+          course_id: { type: "number", description: "The Canvas course ID." },
         },
         required: ["course_id"],
       },
@@ -69,49 +56,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "get_all_assignments",
       description:
-        "Fetch every assignment across all active courses, sorted by due_at ascending. Overdue assignments are flagged. Useful for a comprehensive view of all work.",
-      inputSchema: {
-        type: "object",
-        properties: {},
-        required: [],
-      },
+        "Fetch every assignment across all active courses sorted by due_at ascending. Shows each student's personal submission status. Overdue unsubmitted assignments are flagged.",
+      inputSchema: { type: "object", properties: {}, required: [] },
     },
     {
       name: "get_upcoming_assignments",
       description:
-        "Fetch assignments due within the next N days (default 7) across all active courses. Use this for weekly planning or 'what's due soon' questions.",
+        "Fetch assignments due within the next N days (default 7) across all active courses. Shows accurate per-student submission status.",
       inputSchema: {
         type: "object",
         properties: {
-          days: {
-            type: "number",
-            description: "Number of days to look ahead (default: 7).",
-          },
+          days: { type: "number", description: "Number of days to look ahead (default: 7)." },
         },
         required: [],
       },
     },
     {
       name: "get_calendar_events",
-      description:
-        "Fetch upcoming Canvas calendar events for the next 30 days including title, start_at, end_at, and description.",
-      inputSchema: {
-        type: "object",
-        properties: {},
-        required: [],
-      },
+      description: "Fetch upcoming Canvas calendar events for the next 30 days.",
+      inputSchema: { type: "object", properties: {}, required: [] },
     },
     {
       name: "get_submission_status",
       description:
-        "Check submission status for all assignments in a course. Shows whether each assignment is submitted, graded, unsubmitted, or pending review. Flags overdue unsubmitted work.",
+        "Check personal submission status for all assignments in a course. Shows submitted/graded/unsubmitted state per assignment and flags overdue missing work.",
       inputSchema: {
         type: "object",
         properties: {
-          course_id: {
-            type: "number",
-            description: "The Canvas course ID.",
-          },
+          course_id: { type: "number", description: "The Canvas course ID." },
         },
         required: ["course_id"],
       },
@@ -123,10 +95,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object",
         properties: {
-          course_id: {
-            type: "number",
-            description: "The Canvas course ID.",
-          },
+          course_id: { type: "number", description: "The Canvas course ID." },
         },
         required: ["course_id"],
       },
@@ -138,32 +107,59 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object",
         properties: {
-          course_id: {
-            type: "number",
-            description: "The Canvas course ID.",
-          },
+          course_id: { type: "number", description: "The Canvas course ID." },
         },
         required: ["course_id"],
       },
     },
     {
       name: "get_announcements",
-      description:
-        "Fetch recent announcements from all active courses, sorted newest first.",
-      inputSchema: {
-        type: "object",
-        properties: {},
-        required: [],
-      },
+      description: "Fetch recent announcements from all active courses, sorted newest first.",
+      inputSchema: { type: "object", properties: {}, required: [] },
     },
     {
       name: "get_todo_items",
+      description: "Fetch the student's Canvas to-do list.",
+      inputSchema: { type: "object", properties: {}, required: [] },
+    },
+    {
+      name: "get_course_files",
       description:
-        "Fetch the student's Canvas to-do list including upcoming assignments, unsubmitted work, and other pending items.",
+        "Fetch all files uploaded to a course (lecture slides, PDFs, resources, etc.) sorted by most recently updated. Returns file name, type, size, and download URL.",
       inputSchema: {
         type: "object",
-        properties: {},
-        required: [],
+        properties: {
+          course_id: { type: "number", description: "The Canvas course ID." },
+        },
+        required: ["course_id"],
+      },
+    },
+    {
+      name: "get_course_pages",
+      description:
+        "List all pages (wiki pages, course content pages) in a course. Use get_page_content to read a specific page's full text.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          course_id: { type: "number", description: "The Canvas course ID." },
+        },
+        required: ["course_id"],
+      },
+    },
+    {
+      name: "get_page_content",
+      description:
+        "Fetch the full text content of a specific Canvas page. Use get_course_pages first to find the page URL slug.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          course_id: { type: "number", description: "The Canvas course ID." },
+          page_url: {
+            type: "string",
+            description: "The page URL slug (e.g. 'syllabus' or 'week-1-overview').",
+          },
+        },
+        required: ["course_id", "page_url"],
       },
     },
   ],
@@ -184,9 +180,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_assignments": {
         const courseId = args?.course_id;
-        if (typeof courseId !== "number") {
+        if (typeof courseId !== "number")
           throw new McpError(ErrorCode.InvalidParams, "course_id must be a number.");
-        }
         result = await getAssignments(courseId);
         break;
       }
@@ -207,27 +202,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_submission_status": {
         const courseId = args?.course_id;
-        if (typeof courseId !== "number") {
+        if (typeof courseId !== "number")
           throw new McpError(ErrorCode.InvalidParams, "course_id must be a number.");
-        }
         result = await getSubmissionStatus(courseId);
         break;
       }
 
       case "get_grades": {
         const courseId = args?.course_id;
-        if (typeof courseId !== "number") {
+        if (typeof courseId !== "number")
           throw new McpError(ErrorCode.InvalidParams, "course_id must be a number.");
-        }
         result = await getGrades(courseId);
         break;
       }
 
       case "get_course_modules": {
         const courseId = args?.course_id;
-        if (typeof courseId !== "number") {
+        if (typeof courseId !== "number")
           throw new McpError(ErrorCode.InvalidParams, "course_id must be a number.");
-        }
         result = await getCourseModules(courseId);
         break;
       }
@@ -240,24 +232,43 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = await getTodoItems();
         break;
 
+      case "get_course_files": {
+        const courseId = args?.course_id;
+        if (typeof courseId !== "number")
+          throw new McpError(ErrorCode.InvalidParams, "course_id must be a number.");
+        result = await getCourseFiles(courseId);
+        break;
+      }
+
+      case "get_course_pages": {
+        const courseId = args?.course_id;
+        if (typeof courseId !== "number")
+          throw new McpError(ErrorCode.InvalidParams, "course_id must be a number.");
+        result = await getCoursePages(courseId);
+        break;
+      }
+
+      case "get_page_content": {
+        const courseId = args?.course_id;
+        const pageUrl = args?.page_url;
+        if (typeof courseId !== "number")
+          throw new McpError(ErrorCode.InvalidParams, "course_id must be a number.");
+        if (typeof pageUrl !== "string")
+          throw new McpError(ErrorCode.InvalidParams, "page_url must be a string.");
+        result = await getPageContent(courseId, pageUrl);
+        break;
+      }
+
       default:
         throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
     }
 
-    return {
-      content: [{ type: "text", text: result }],
-    };
+    return { content: [{ type: "text", text: result }] };
   } catch (error) {
     if (error instanceof McpError) throw error;
-
     const message = error instanceof Error ? error.message : String(error);
     return {
-      content: [
-        {
-          type: "text",
-          text: `Error calling Canvas API: ${message}`,
-        },
-      ],
+      content: [{ type: "text", text: `Error calling Canvas API: ${message}` }],
       isError: true,
     };
   }

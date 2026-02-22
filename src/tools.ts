@@ -11,6 +11,8 @@ import {
   CanvasModuleItem,
   CanvasDiscussionTopic,
   CanvasTodoItem,
+  CanvasFile,
+  CanvasPage,
 } from "./canvas-client.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -35,6 +37,29 @@ async function getActiveCourses(): Promise<CanvasCourse[]> {
   return courses.filter((c) => c.workflow_state === "available");
 }
 
+/**
+ * Returns the correct submission status for the current user.
+ * Uses the `submission` object included via include[]=submission,
+ * NOT `has_submitted_submissions` which is an instructor aggregate field.
+ */
+function submissionStatus(a: CanvasAssignment): {
+  label: string;
+  submitted: boolean;
+  state: string;
+} {
+  const sub = a.submission;
+  if (!sub || sub.workflow_state === "unsubmitted" || sub.submitted_at === null) {
+    return { label: "Not submitted", submitted: false, state: "unsubmitted" };
+  }
+  if (sub.workflow_state === "graded") {
+    return { label: `Graded (${sub.score ?? "?"} pts)`, submitted: true, state: "graded" };
+  }
+  if (sub.workflow_state === "pending_review") {
+    return { label: "Submitted (pending review)", submitted: true, state: "pending_review" };
+  }
+  return { label: "Submitted", submitted: true, state: sub.workflow_state };
+}
+
 // ── Tool implementations ─────────────────────────────────────────────────────
 
 export async function getCourses(): Promise<string> {
@@ -56,7 +81,7 @@ export async function getCourses(): Promise<string> {
 
 export async function getAssignments(courseId: number): Promise<string> {
   const assignments = await fetchAllPages<CanvasAssignment>(
-    `${BASE_URL}/courses/${courseId}/assignments?per_page=100&order_by=due_at`
+    `${BASE_URL}/courses/${courseId}/assignments?per_page=100&order_by=due_at&include[]=submission`
   );
 
   if (assignments.length === 0) {
@@ -65,12 +90,13 @@ export async function getAssignments(courseId: number): Promise<string> {
 
   const lines = assignments.map((a) => {
     const overdue = isOverdue(a.due_at) ? " ⚠ OVERDUE" : "";
+    const { label } = submissionStatus(a);
     return [
       `• [${a.id}] ${a.name}${overdue}`,
       `  Due: ${a.due_at ?? "No due date"}`,
       `  Points: ${a.points_possible ?? "N/A"}`,
       `  Types: ${a.submission_types.join(", ")}`,
-      `  Submitted: ${a.has_submitted_submissions ? "Yes" : "No"}`,
+      `  Status: ${label}`,
     ].join("\n");
   });
 
@@ -90,7 +116,7 @@ export async function getAllAssignments(): Promise<string> {
     courses.map(async (course) => {
       try {
         const assignments = await fetchAllPages<CanvasAssignment>(
-          `${BASE_URL}/courses/${course.id}/assignments?per_page=100`
+          `${BASE_URL}/courses/${course.id}/assignments?per_page=100&include[]=submission`
         );
         for (const a of assignments) {
           allAssignments.push({ ...a, course_name: course.name });
@@ -101,7 +127,6 @@ export async function getAllAssignments(): Promise<string> {
     })
   );
 
-  // Sort by due_at ascending (null due dates go to the end)
   allAssignments.sort((a, b) => {
     if (!a.due_at && !b.due_at) return 0;
     if (!a.due_at) return 1;
@@ -115,10 +140,11 @@ export async function getAllAssignments(): Promise<string> {
 
   const lines = allAssignments.map((a) => {
     const overdue = isOverdue(a.due_at) ? " ⚠ OVERDUE" : "";
+    const { label } = submissionStatus(a);
     return [
       `• [Course: ${a.course_name}] ${a.name}${overdue}`,
       `  Due: ${a.due_at ?? "No due date"}`,
-      `  Points: ${a.points_possible ?? "N/A"}  |  Submitted: ${a.has_submitted_submissions ? "Yes" : "No"}`,
+      `  Points: ${a.points_possible ?? "N/A"}  |  Status: ${label}`,
     ].join("\n");
   });
 
@@ -138,7 +164,7 @@ export async function getUpcomingAssignments(days: number = 7): Promise<string> 
     courses.map(async (course) => {
       try {
         const assignments = await fetchAllPages<CanvasAssignment>(
-          `${BASE_URL}/courses/${course.id}/assignments?per_page=100`
+          `${BASE_URL}/courses/${course.id}/assignments?per_page=100&include[]=submission`
         );
         for (const a of assignments) {
           if (daysFromNow(a.due_at, days)) {
@@ -160,13 +186,15 @@ export async function getUpcomingAssignments(days: number = 7): Promise<string> 
     return `No assignments due in the next ${days} day(s).`;
   }
 
-  const lines = upcoming.map((a) =>
-    [
-      `• [${a.course_name}] ${a.name}`,
+  const lines = upcoming.map((a) => {
+    const { label, submitted } = submissionStatus(a);
+    const icon = submitted ? "✅" : "❌";
+    return [
+      `${icon} [${a.course_name}] ${a.name}`,
       `  Due: ${a.due_at}`,
-      `  Points: ${a.points_possible ?? "N/A"}  |  Submitted: ${a.has_submitted_submissions ? "Yes" : "No"}`,
-    ].join("\n")
-  );
+      `  Points: ${a.points_possible ?? "N/A"}  |  Status: ${label}`,
+    ].join("\n");
+  });
 
   return `Assignments Due in the Next ${days} Day(s) (${upcoming.length} total):\n\n${lines.join("\n\n")}`;
 }
@@ -204,39 +232,23 @@ export async function getCalendarEvents(): Promise<string> {
 }
 
 export async function getSubmissionStatus(courseId: number): Promise<string> {
-  const [assignments, submissions] = await Promise.all([
-    fetchAllPages<CanvasAssignment>(
-      `${BASE_URL}/courses/${courseId}/assignments?per_page=100`
-    ),
-    fetchAllPages<CanvasSubmission>(
-      `${BASE_URL}/courses/${courseId}/submissions?per_page=100&student_ids[]=self`
-    ),
-  ]);
+  const assignments = await fetchAllPages<CanvasAssignment>(
+    `${BASE_URL}/courses/${courseId}/assignments?per_page=100&include[]=submission`
+  );
 
   if (assignments.length === 0) {
     return `No assignments found for course ${courseId}.`;
   }
 
-  const submissionMap = new Map<number, CanvasSubmission>();
-  for (const s of submissions) {
-    submissionMap.set(s.assignment_id, s);
-  }
-
   const lines = assignments.map((a) => {
-    const sub = submissionMap.get(a.id);
-    const state = sub?.workflow_state ?? "unsubmitted";
-    const stateEmoji =
-      state === "graded"
-        ? "✅"
-        : state === "submitted" || state === "pending_review"
-          ? "📤"
-          : "❌";
-    const overdue = isOverdue(a.due_at) && state === "unsubmitted" ? " ⚠ OVERDUE" : "";
+    const { label, submitted, state } = submissionStatus(a);
+    const stateEmoji = state === "graded" ? "✅" : submitted ? "📤" : "❌";
+    const overdue = isOverdue(a.due_at) && !submitted ? " ⚠ OVERDUE" : "";
 
     return [
       `${stateEmoji} ${a.name}${overdue}`,
-      `   Status: ${state}  |  Due: ${a.due_at ?? "N/A"}`,
-      sub?.score != null ? `   Score: ${sub.score}/${a.points_possible ?? "?"}` : null,
+      `   Status: ${label}  |  Due: ${a.due_at ?? "N/A"}`,
+      a.points_possible != null ? `   Points: ${a.points_possible}` : null,
     ]
       .filter(Boolean)
       .join("\n");
@@ -246,19 +258,19 @@ export async function getSubmissionStatus(courseId: number): Promise<string> {
 }
 
 export async function getGrades(courseId: number): Promise<string> {
-  // Get enrollment for overall grade
   const enrollments = await fetchAllPages<CanvasEnrollment>(
     `${BASE_URL}/courses/${courseId}/enrollments?type[]=StudentEnrollment&user_id=self&per_page=100`
   );
 
   const enrollment = enrollments[0];
 
-  // Get per-assignment submissions with grades
-  const submissions = await fetchAllPages<CanvasSubmission>(
-    `${BASE_URL}/courses/${courseId}/submissions?per_page=100&student_ids[]=self&include[]=assignment`
+  const assignments = await fetchAllPages<CanvasAssignment>(
+    `${BASE_URL}/courses/${courseId}/assignments?per_page=100&include[]=submission`
   );
 
-  const graded = submissions.filter((s) => s.score != null);
+  const graded = assignments.filter(
+    (a) => a.submission?.score != null && a.submission.submitted_at !== null
+  );
 
   const header = enrollment
     ? [
@@ -273,10 +285,10 @@ export async function getGrades(courseId: number): Promise<string> {
     return header + "No graded assignments yet.";
   }
 
-  const lines = graded.map((s) => {
-    const name = s.assignment?.name ?? `Assignment ${s.assignment_id}`;
-    const possible = s.assignment?.points_possible;
-    return `• ${name}: ${s.grade ?? s.score} ${possible != null ? `/ ${possible} pts` : ""}`;
+  const lines = graded.map((a) => {
+    const score = a.submission?.score;
+    const grade = a.submission?.grade;
+    return `• ${a.name}: ${grade ?? score} ${a.points_possible != null ? `/ ${a.points_possible} pts` : ""}`;
   });
 
   return header + `Per-Assignment Scores (${graded.length}):\n\n${lines.join("\n")}`;
@@ -316,9 +328,7 @@ export async function getCourseModules(courseId: number): Promise<string> {
     });
 
     sections.push(
-      [`${stateIcon} Module: ${mod.name} (${mod.items_count} items)`, ...itemLines].join(
-        "\n"
-      )
+      [`${stateIcon} Module: ${mod.name} (${mod.items_count} items)`, ...itemLines].join("\n")
     );
   }
 
@@ -341,7 +351,6 @@ export async function getAnnouncements(): Promise<string> {
     return "No recent announcements found.";
   }
 
-  // Sort newest first
   announcements.sort((a, b) => {
     if (!a.posted_at || !b.posted_at) return 0;
     return new Date(b.posted_at).getTime() - new Date(a.posted_at).getTime();
@@ -384,4 +393,63 @@ export async function getTodoItems(): Promise<string> {
   });
 
   return `Canvas To-Do Items (${todos.length}):\n\n${lines.join("\n\n")}`;
+}
+
+export async function getCourseFiles(courseId: number): Promise<string> {
+  const files = await fetchAllPages<CanvasFile>(
+    `${BASE_URL}/courses/${courseId}/files?per_page=100&sort=updated_at&order=desc`
+  );
+
+  if (files.length === 0) {
+    return `No files found for course ${courseId}.`;
+  }
+
+  const lines = files.map((f) => {
+    const sizeMb = (f.size / 1024 / 1024).toFixed(2);
+    return [
+      `• [${f.id}] ${f.display_name}`,
+      `  Type: ${f.content_type}  |  Size: ${sizeMb} MB`,
+      `  Updated: ${f.updated_at}`,
+      `  URL: ${f.url}`,
+    ].join("\n");
+  });
+
+  return `Files for Course ${courseId} (${files.length} total):\n\n${lines.join("\n\n")}`;
+}
+
+export async function getCoursePages(courseId: number): Promise<string> {
+  const pages = await fetchAllPages<CanvasPage>(
+    `${BASE_URL}/courses/${courseId}/pages?per_page=100&sort=updated_at&order=desc`
+  );
+
+  if (pages.length === 0) {
+    return `No pages found for course ${courseId}.`;
+  }
+
+  const lines = pages.map((p) =>
+    [
+      `• [${p.url}] ${p.title}`,
+      `  Updated: ${p.updated_at}`,
+    ].join("\n")
+  );
+
+  return `Pages for Course ${courseId} (${pages.length} total):\n\n${lines.join("\n\n")}`;
+}
+
+export async function getPageContent(courseId: number, pageUrl: string): Promise<string> {
+  const page = await fetchOne<CanvasPage>(
+    `${BASE_URL}/courses/${courseId}/pages/${pageUrl}`
+  );
+
+  const body = page.body
+    ? page.body.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").trim()
+    : "No content";
+
+  return [
+    `Page: ${page.title}`,
+    `Course: ${courseId}`,
+    `Updated: ${page.updated_at}`,
+    ``,
+    body,
+  ].join("\n");
 }

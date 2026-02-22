@@ -102,6 +102,29 @@ export interface CanvasAssignment {
   submission_types: string[];
   has_submitted_submissions: boolean;
   workflow_state: string;
+  // Populated when fetched with include[]=submission
+  submission?: CanvasSubmission;
+}
+
+export interface CanvasFile {
+  id: number;
+  display_name: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  url: string;
+  created_at: string;
+  updated_at: string;
+  folder_id: number;
+}
+
+export interface CanvasPage {
+  page_id: number;
+  url: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  body: string | null;
 }
 
 export interface CanvasSubmission {
