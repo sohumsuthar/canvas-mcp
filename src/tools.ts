@@ -1,6 +1,5 @@
-import * as pdfParseModule from "pdf-parse";
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const pdfParse: (buf: Buffer) => Promise<{ text: string }> = (pdfParseModule as any).default ?? pdfParseModule;
+// eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-explicit-any
+const pdfParse: (buf: Buffer) => Promise<{ text: string }> = require("pdf-parse");
 import {
   BASE_URL,
   AUTH_HEADERS,
