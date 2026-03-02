@@ -543,6 +543,43 @@ export async function getModuleItemContent(courseId: number, moduleName: string)
   return results.join("\n");
 }
 
+export async function readAllCourseFiles(courseId: number, pdfOnly: boolean = true): Promise<string> {
+  const files = await fetchAllPages<CanvasFile>(
+    `${BASE_URL}/courses/${courseId}/files?per_page=100&sort=updated_at&order=desc`
+  );
+
+  if (files.length === 0) {
+    return `No files found for course ${courseId}.`;
+  }
+
+  const targets = pdfOnly
+    ? files.filter((f) => f.content_type === "application/pdf")
+    : files;
+
+  if (targets.length === 0) {
+    return `No PDF files found for course ${courseId}.`;
+  }
+
+  const results: string[] = [`Reading ${targets.length} file(s) from course ${courseId}:\n`];
+
+  for (const file of targets) {
+    results.push(`${"=".repeat(60)}\nFile: ${file.display_name}\nSize: ${(file.size / 1024).toFixed(1)} KB  |  Updated: ${file.updated_at}\n${"=".repeat(60)}`);
+
+    if (file.content_type === "application/pdf") {
+      try {
+        const text = await parsePdfFromUrl(file.url);
+        results.push(text);
+      } catch (e) {
+        results.push(`(PDF parsing failed: ${e instanceof Error ? e.message : String(e)})`);
+      }
+    } else {
+      results.push(`Type: ${file.content_type}\nDownload URL: ${file.url}\n(Non-PDF file — cannot extract text.)`);
+    }
+  }
+
+  return results.join("\n\n");
+}
+
 export async function readCourseFile(courseId: number, fileId: number): Promise<string> {
   const file = await fetchOne<CanvasFile>(
     `${BASE_URL}/courses/${courseId}/files/${fileId}`

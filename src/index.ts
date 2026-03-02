@@ -23,13 +23,14 @@ import {
   getPageContent,
   getModuleItemContent,
   readCourseFile,
+  readAllCourseFiles,
 } from "./tools.js";
 
 // Validate env vars immediately on startup
 validateEnv();
 
 const server = new Server(
-  { name: "canvas-mcp", version: "1.1.0" },
+  { name: "canvas-mcp", version: "1.2.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -178,6 +179,22 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "read_all_course_files",
+      description:
+        "Download and parse every file in a course at once. By default reads only PDFs and extracts their full text. Set pdf_only to false to include all file types (non-PDFs return metadata only). Use this when asked to read all course materials, the full course content, or all lecture PDFs at once.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          course_id: { type: "number", description: "The Canvas course ID." },
+          pdf_only: {
+            type: "boolean",
+            description: "If true (default), only process PDF files. If false, include all file types.",
+          },
+        },
+        required: ["course_id"],
+      },
+    },
+    {
       name: "get_module_item_content",
       description:
         "Read the full text content of Canvas module items — lecture pages, lecture notes, and PDF files. USE THIS TOOL when asked about: what was in a lecture, what was covered this week, last lecture content, lecture notes, course readings. Do NOT use get_assignments for lecture content. Example: module_name='Week 6' reads all lectures in week 6. module_name='L17' reads a specific lecture.",
@@ -298,6 +315,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (typeof fileId !== "number")
           throw new McpError(ErrorCode.InvalidParams, "file_id must be a number.");
         result = await readCourseFile(courseId, fileId);
+        break;
+      }
+
+      case "read_all_course_files": {
+        const courseId = args?.course_id;
+        if (typeof courseId !== "number")
+          throw new McpError(ErrorCode.InvalidParams, "course_id must be a number.");
+        const pdfOnly = args?.pdf_only !== false;
+        result = await readAllCourseFiles(courseId, pdfOnly);
         break;
       }
 
